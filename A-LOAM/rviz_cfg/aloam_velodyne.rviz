@@ -8,6 +8,8 @@ Panels:
         - /Status1
         - /odometry1/odomPath1
         - /odometry1/PointCloud21
+        - /Image1
+        - /Image1/Status1
       Splitter Ratio: 0.5
     Tree Height: 539
   - Class: rviz/Selection
@@ -620,7 +622,7 @@ Visualization Manager:
       Name: scan
     - Class: rviz/Image
       Enabled: true
-      Image Topic: /kitti/image
+      Image Topic: /cam
       Max Value: 1
       Median window: 5
       Min Value: 0
@@ -717,7 +719,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/XYOrbit
-      Distance: 13.509847640991211
+      Distance: 13.315305709838867
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -733,9 +735,9 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.7197967767715454
+      Pitch: 0.9247966408729553
       Target Frame: body
-      Yaw: 4.3899970054626465
+      Yaw: 4.664982318878174
     Saved: ~
 Window Geometry:
   Displays:
@@ -755,5 +757,5 @@ Window Geometry:
   Views:
     collapsed: true
   Width: 1855
-  X: 132
-  Y: 268
+  X: 440
+  Y: 212
