@@ -305,21 +305,28 @@ void process()
 			mBuf.unlock();
 
 			TicToc t_whole;
-
+			//根据前端结果得到的后端估计值
 			transformAssociateToMap();
 
 			TicToc t_shift;
-			int centerCubeI = int((t_w_curr.x() + 25.0) / 50.0) + laserCloudCenWidth;
+			//根据初始估计值计算寻找当前位姿在地图中索引，一个各自边长是50cm
+			//后端的地图本质是一个以当前点为中心的一个栅格地图
+			// laserCloudCenWidth、laserCloudCenHeight 和 laserCloudCenDepth 是中心索引的偏移量
+			int centerCubeI = int((t_w_curr.x() + 25.0) / 50.0) + laserCloudCenWidth;//索引，加25可以实现四舍五入
 			int centerCubeJ = int((t_w_curr.y() + 25.0) / 50.0) + laserCloudCenHeight;
 			int centerCubeK = int((t_w_curr.z() + 25.0) / 50.0) + laserCloudCenDepth;
-
+			// 检查当前点是否接近原点，如果是，则将相应的索引减一。这是为了确保索引在负坐标区域时的正确性
 			if (t_w_curr.x() + 25.0 < 0)
 				centerCubeI--;
 			if (t_w_curr.y() + 25.0 < 0)
 				centerCubeJ--;
 			if (t_w_curr.z() + 25.0 < 0)
 				centerCubeK--;
-
+			// 目的：当 centerCubeI 小于 3 时，表示当前点接近地图的边界。 此时需要将地图向 X 轴正方向移动，给左侧腾出空间。
+			// 循环内容：
+			// 遍历整张点云地图的高度和深度，对每个栅格的点云进行处理。
+			// 从后向前移动点云数据，确保每个栅格的点云数据向前挪动一格。
+			// 将最前面的栅格（i 为 0 的位置）用之前保存的指针 laserCloudCubeCornerPointer 和 laserCloudCubeSurfPointer 填充，并清空它们的内容，以为新的点云数据留出空间。
 			while (centerCubeI < 3)
 			{
 				for (int j = 0; j < laserCloudHeight; j++)
@@ -327,10 +334,12 @@ void process()
 					for (int k = 0; k < laserCloudDepth; k++)
 					{ 
 						int i = laserCloudWidth - 1;
-						pcl::PointCloud<PointType>::Ptr laserCloudCubeCornerPointer =
+						//用一维数组表示三维
+						pcl::PointCloud<PointType>::Ptr laserCloudCubeCornerPointer =	//角点
 							laserCloudCornerArray[i + laserCloudWidth * j + laserCloudWidth * laserCloudHeight * k]; 
-						pcl::PointCloud<PointType>::Ptr laserCloudCubeSurfPointer =
+						pcl::PointCloud<PointType>::Ptr laserCloudCubeSurfPointer =		//面点
 							laserCloudSurfArray[i + laserCloudWidth * j + laserCloudWidth * laserCloudHeight * k];
+						//整体右移
 						for (; i >= 1; i--)
 						{
 							laserCloudCornerArray[i + laserCloudWidth * j + laserCloudWidth * laserCloudHeight * k] =
@@ -338,6 +347,7 @@ void process()
 							laserCloudSurfArray[i + laserCloudWidth * j + laserCloudWidth * laserCloudHeight * k] =
 								laserCloudSurfArray[i - 1 + laserCloudWidth * j + laserCloudWidth * laserCloudHeight * k];
 						}
+						//从for循环出来时，i为0
 						laserCloudCornerArray[i + laserCloudWidth * j + laserCloudWidth * laserCloudHeight * k] =
 							laserCloudCubeCornerPointer;
 						laserCloudSurfArray[i + laserCloudWidth * j + laserCloudWidth * laserCloudHeight * k] =
@@ -346,11 +356,11 @@ void process()
 						laserCloudCubeSurfPointer->clear();
 					}
 				}
-
+				//索引右移，地图右移，左侧腾出空间
 				centerCubeI++;
 				laserCloudCenWidth++;
 			}
-
+			// 当 centerCubeI 的值大于或等于 laserCloudWidth - 3 时，表示当前点接近地图的右边界（即 X 轴的最大索引），将地图左移
 			while (centerCubeI >= laserCloudWidth - 3)
 			{ 
 				for (int j = 0; j < laserCloudHeight; j++)
@@ -882,7 +892,7 @@ void process()
 			q.setY(q_w_curr.y());
 			q.setZ(q_w_curr.z());
 			transform.setRotation(q);
-			br.sendTransform(tf::StampedTransform(transform, odomAftMapped.header.stamp, "camera_init", "aft_mapped"));
+			br.sendTransform(tf::StampedTransform(transform, odomAftMapped.header.stamp, "/camera_init", "/aft_mapped"));
 
 			frameCount++;
 		}

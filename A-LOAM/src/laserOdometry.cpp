@@ -62,7 +62,7 @@
 int corner_correspondence = 0, plane_correspondence = 0;
 
 constexpr double SCAN_PERIOD = 0.1;
-constexpr double DISTANCE_SQ_THRESHOLD = 25;
+constexpr double DISTANCE_SQ_THRESHOLD = 25;    //搜索距离阈值
 constexpr double NEARBY_SCAN = 2.5;
 
 int skipFrameNum = 5;
@@ -74,17 +74,17 @@ double timeSurfPointsFlat = 0;
 double timeSurfPointsLessFlat = 0;
 double timeLaserCloudFullRes = 0;
 
-pcl::KdTreeFLANN<pcl::PointXYZI>::Ptr kdtreeCornerLast(new pcl::KdTreeFLANN<pcl::PointXYZI>());
-pcl::KdTreeFLANN<pcl::PointXYZI>::Ptr kdtreeSurfLast(new pcl::KdTreeFLANN<pcl::PointXYZI>());
+pcl::KdTreeFLANN<pcl::PointXYZI>::Ptr kdtreeCornerLast(new pcl::KdTreeFLANN<pcl::PointXYZI>()); //存储上一帧的角点数据 Kd-Tree
+pcl::KdTreeFLANN<pcl::PointXYZI>::Ptr kdtreeSurfLast(new pcl::KdTreeFLANN<pcl::PointXYZI>());   //储最后一帧的平坦表面点云数据的 Kd-Tree
 
-pcl::PointCloud<PointType>::Ptr cornerPointsSharp(new pcl::PointCloud<PointType>());
-pcl::PointCloud<PointType>::Ptr cornerPointsLessSharp(new pcl::PointCloud<PointType>());
-pcl::PointCloud<PointType>::Ptr surfPointsFlat(new pcl::PointCloud<PointType>());
-pcl::PointCloud<PointType>::Ptr surfPointsLessFlat(new pcl::PointCloud<PointType>());
+pcl::PointCloud<PointType>::Ptr cornerPointsSharp(new pcl::PointCloud<PointType>());    // 角点
+pcl::PointCloud<PointType>::Ptr cornerPointsLessSharp(new pcl::PointCloud<PointType>());    //less角点
+pcl::PointCloud<PointType>::Ptr surfPointsFlat(new pcl::PointCloud<PointType>());   //面点
+pcl::PointCloud<PointType>::Ptr surfPointsLessFlat(new pcl::PointCloud<PointType>());   //Less面点
 
-pcl::PointCloud<PointType>::Ptr laserCloudCornerLast(new pcl::PointCloud<PointType>());
-pcl::PointCloud<PointType>::Ptr laserCloudSurfLast(new pcl::PointCloud<PointType>());
-pcl::PointCloud<PointType>::Ptr laserCloudFullRes(new pcl::PointCloud<PointType>());
+pcl::PointCloud<PointType>::Ptr laserCloudCornerLast(new pcl::PointCloud<PointType>()); //存储上一帧的角点点云数据
+pcl::PointCloud<PointType>::Ptr laserCloudSurfLast(new pcl::PointCloud<PointType>());   //存储上一帧的平坦表面点云数据
+pcl::PointCloud<PointType>::Ptr laserCloudFullRes(new pcl::PointCloud<PointType>());    //存储完整的高分辨率点云数据
 
 int laserCloudCornerLastNum = 0;
 int laserCloudSurfLastNum = 0;
@@ -110,13 +110,15 @@ std::mutex mBuf;
 // undistort lidar point
 void TransformToStart(PointType const *const pi, PointType *const po)
 {
-    //interpolation ratio
+    //插值比
     double s;
+    //kitti数据集对雷达做过了运动补偿，所以默认DISTORTION为0，不做补偿
     if (DISTORTION)
         s = (pi->intensity - int(pi->intensity)) / SCAN_PERIOD;
     else
         s = 1.0;
     //s = 1;
+    //将变换矩阵分解为旋转q和平移t两个矩阵，旋转采用球面线性插值
     Eigen::Quaterniond q_point_last = Eigen::Quaterniond::Identity().slerp(s, q_last_curr);
     Eigen::Vector3d t_point_last = s * t_last_curr;
     Eigen::Vector3d point(pi->x, pi->y, pi->z);
@@ -139,7 +141,7 @@ void TransformToEnd(PointType const *const pi, PointType *const po)
     Eigen::Vector3d un_point(un_point_tmp.x, un_point_tmp.y, un_point_tmp.z);
     Eigen::Vector3d point_end = q_last_curr.inverse() * (un_point - t_last_curr);
 
-    po->x = point_end.x();
+    po->x = point_end.x(); 
     po->y = point_end.y();
     po->z = point_end.z();
 
@@ -275,6 +277,9 @@ int main(int argc, char **argv)
                 int surfPointsFlatNum = surfPointsFlat->points.size();
 
                 TicToc t_opt;
+                // 点云数据通常具有复杂的非线性特性，简单的一次优化可能无法捕捉到所有的特征和关系。通过多次迭代，优化器能够更好地适应数据的变化，处理潜在的局部最优。
+                // 使用多次迭代可以降低对初始参数的敏感性。即使第一次的初始估计不够准确，通过第二次优化可以进行纠正，得到更好的结果
+                // 通过多次优化，算法可以在每次迭代中逐步减少残差。这种递进式的优化方法能够提高收敛性，使得最后的结果更稳定和可靠
                 for (size_t opti_counter = 0; opti_counter < 2; ++opti_counter)
                 {
                     corner_correspondence = 0;
@@ -291,33 +296,46 @@ int main(int argc, char **argv)
 
                     pcl::PointXYZI pointSel;
                     std::vector<int> pointSearchInd;
-                    std::vector<float> pointSearchSqDis;
+                    std::vector<float> pointSearchSqDis;    //最临近点平方距离
 
                     TicToc t_data;
-                    // find correspondence for corner features
+
+                    // 寻找角点特征的对应关系
+                    //寻找角点的约束
+                    /* 思路：将点云转换到上一帧做最近邻查找，找到最近邻点之后，
+                        作为指定点进行查找一定范围内可以构成直线的角点。同时要保证不是在同一scan下，不然会是面上的直线
+                        然后进行
+                    */
                     for (int i = 0; i < cornerPointsSharpNum; ++i)
                     {
+                        //运动补偿，将当前帧中的锐角点（cornerPointsSharp->points[i]）转换到上一帧的坐标系
                         TransformToStart(&(cornerPointsSharp->points[i]), &pointSel);
+                        //在上一帧所有角点构成的kd-tree中寻找距离当前帧最近的一个点    
+                        //[in]指定点位置 [in]最临近点个数 [out]最临近点索引 [out]最临近点平方距离                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
                         kdtreeCornerLast->nearestKSearch(pointSel, 1, pointSearchInd, pointSearchSqDis);
-
+                        // closestPointInd 用于存储最近邻点的索引，minPointInd2 用于存储找到的更近点的索引
                         int closestPointInd = -1, minPointInd2 = -1;
+                        // 检查找到的最近邻点是否在设定的距离阈值（DISTANCE_SQ_THRESHOLD）内。如果满足条件，继续处理。
                         if (pointSearchSqDis[0] < DISTANCE_SQ_THRESHOLD)
                         {
+                            // 将最近邻点的索引赋值给 closestPointInd，并获取该点的扫描线 ID
                             closestPointInd = pointSearchInd[0];
                             int closestPointScanID = int(laserCloudCornerLast->points[closestPointInd].intensity);
 
+                            // 初始化为距离阈值，以便用于后续的搜索。
                             double minPointSqDis2 = DISTANCE_SQ_THRESHOLD;
-                            // search in the direction of increasing scan line
+                            // 沿扫描线递增的方向进行搜索
+                            // 在最近邻点的前后方向中，继续查找更近的平面特征点
                             for (int j = closestPointInd + 1; j < (int)laserCloudCornerLast->points.size(); ++j)
                             {
                                 // if in the same scan line, continue
                                 if (int(laserCloudCornerLast->points[j].intensity) <= closestPointScanID)
                                     continue;
 
-                                // if not in nearby scans, end the loop
+                                // 如果在附近扫描中未找到，结束循环
                                 if (int(laserCloudCornerLast->points[j].intensity) > (closestPointScanID + NEARBY_SCAN))
                                     break;
-
+                                //上一帧数据和当前数据平方距离
                                 double pointSqDis = (laserCloudCornerLast->points[j].x - pointSel.x) *
                                                         (laserCloudCornerLast->points[j].x - pointSel.x) +
                                                     (laserCloudCornerLast->points[j].y - pointSel.y) *
@@ -328,12 +346,14 @@ int main(int argc, char **argv)
                                 if (pointSqDis < minPointSqDis2)
                                 {
                                     // find nearer point
+                                    //找到最近点
                                     minPointSqDis2 = pointSqDis;
                                     minPointInd2 = j;
                                 }
                             }
 
                             // search in the direction of decreasing scan line
+                            //向前搜索最近点
                             for (int j = closestPointInd - 1; j >= 0; --j)
                             {
                                 // if in the same scan line, continue
@@ -359,14 +379,16 @@ int main(int argc, char **argv)
                                 }
                             }
                         }
-                        if (minPointInd2 >= 0) // both closestPointInd and minPointInd2 is valid
+                        if (minPointInd2 >= 0) // both closestPointInd and minPointInd2 is valid即找到了最近点
                         {
                             Eigen::Vector3d curr_point(cornerPointsSharp->points[i].x,
                                                        cornerPointsSharp->points[i].y,
                                                        cornerPointsSharp->points[i].z);
+                            // 最近邻点
                             Eigen::Vector3d last_point_a(laserCloudCornerLast->points[closestPointInd].x,
                                                          laserCloudCornerLast->points[closestPointInd].y,
                                                          laserCloudCornerLast->points[closestPointInd].z);
+                            // 距最近邻点最近点
                             Eigen::Vector3d last_point_b(laserCloudCornerLast->points[minPointInd2].x,
                                                          laserCloudCornerLast->points[minPointInd2].y,
                                                          laserCloudCornerLast->points[minPointInd2].z);
@@ -376,13 +398,14 @@ int main(int argc, char **argv)
                                 s = (cornerPointsSharp->points[i].intensity - int(cornerPointsSharp->points[i].intensity)) / SCAN_PERIOD;
                             else
                                 s = 1.0;
+                            //每循环一次就创建一个新的残差块，并将其添加到优化问题中
                             ceres::CostFunction *cost_function = LidarEdgeFactor::Create(curr_point, last_point_a, last_point_b, s);
                             problem.AddResidualBlock(cost_function, loss_function, para_q, para_t);
                             corner_correspondence++;
                         }
                     }
 
-                    // find correspondence for plane features
+                    // 寻找平面特征的对应关系
                     for (int i = 0; i < surfPointsFlatNum; ++i)
                     {
                         TransformToStart(&(surfPointsFlat->points[i]), &pointSel);
@@ -479,6 +502,7 @@ int main(int argc, char **argv)
                                 plane_correspondence++;
                             }
                         }
+                        std::cout << "t_last_curr = \n" << t_last_curr << std::endl;
                     }
 
                     //printf("coner_correspondance %d, plane_correspondence %d \n", corner_correspondence, plane_correspondence);
@@ -490,16 +514,28 @@ int main(int argc, char **argv)
                     }
 
                     TicToc t_solver;
+                    // 用于配置优化器的参数。这些参数将影响优化过程的行为。
                     ceres::Solver::Options options;
+                    // 设置线性求解器为 DENSE_QR，意味着使用稠密的 QR 分解算法来解决线性方程组。
                     options.linear_solver_type = ceres::DENSE_QR;
+                    // 设置优化的最大迭代次数为 4。优化器将在达到此次数后结束
                     options.max_num_iterations = 4;
+                    // 设置为 false，表示不将优化过程的进度输出到标准输出（通常是控制台）
                     options.minimizer_progress_to_stdout = false;
+                    // 创建一个 Solver::Summary 对象 summary，用于存储优化过程的汇总信息，包括迭代次数、残差变化、求解时间等
                     ceres::Solver::Summary summary;
+                    // 调用 ceres::Solve 函数执行优化
                     ceres::Solve(options, &problem, &summary);
                     printf("solver time %f ms \n", t_solver.toc());
                 }
                 printf("optimization twice time %f \n", t_opt.toc());
-
+                /////////////// 更新位姿的齐次变换矩阵 ///////////////
+                /*
+                *   T_curr = T_curr * T_last
+                *            ┌  R_curr   t_curr  ┐     ┌  R_last   t_last ┐               
+                *   T_curr = |                   |  *  |                  |
+                *            └     0        1    ┘     └    0         1   ┘
+                */
                 t_w_curr = t_w_curr + q_w_curr * t_last_curr;
                 q_w_curr = q_w_curr * q_last_curr;
             }
