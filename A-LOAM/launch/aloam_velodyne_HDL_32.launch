@@ -22,5 +22,5 @@
     <group if="$(arg rviz)">
         <node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find aloam_velodyne)/rviz_cfg/aloam_velodyne.rviz" />
     </group>
-    <node pkg="tf" type="static_transform_publisher" name="camera_link_to_camera_init"  args="0 0 0 0 0 0 /camera_init /camera_link 10" />
+    
 </launch>
