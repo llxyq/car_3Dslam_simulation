@@ -1,6 +1,7 @@
-# car_3Dslam_simulation
+# Overview
 常见的3D激光slam算法在仿真小车上的应用,包含A-LOAM，LIO-SAM，LEGO-LOAM
 
+# Usage
 1.加载仿真环境和小车：
 
 roslaunch ackermann_vehicle_gazebo ackermann_vehicle_base.launch 
