@@ -50,7 +50,7 @@ Ubuntu 64-bit 20.04. ROS Noetic
 
 ### 1.2 Ceres Solver非线性求解器安装
 
-A-LOAM需要Ceres Solver非线性求解器，在网站http://ceres-solver.org/installation.html下载，推荐下载稳定版`ceres-solver-2.2.0`，文章内相应有安装教程。
+A-LOAM需要Ceres Solver非线性求解器，在网站http://ceres-solver.org/installation.html下载，推荐下载稳定版`ceres-solver-2.2.0`。
 
 前置依赖：
 
